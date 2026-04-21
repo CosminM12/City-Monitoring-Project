@@ -73,7 +73,22 @@ void add_log(const char* district, const char *role, const char *user, const cha
     }
 }
 
+void mode_to_string(mode_t mode, char *str) {
+    strcpy(str, "---------");
+    if(mode & S_IRUSR) str[0] = 'r';
+    if(mode & S_IWUSR) str[1] = 'w';
+    if(mode & S_IXUSR) str[2] = 'x';
 
+    if(mode & S_IRGRP) str[3] = 'r';
+    if(mode & S_IWGRP) str[4] = 'w';
+    if(mode & S_IXGRP) str[5] = 'x';
+
+    if(mode & S_IROTH) str[6] = 'r';
+    if(mode & S_IWOTH) str[7] = 'w';
+    if(mode & S_IXOTH) str[8] = 'x';
+}
+
+//=====INIT=====
 void init_district(const char *district) {
     struct stat st;
 
@@ -182,6 +197,35 @@ void add(const char *district, const char *role, const char *user) {
     printf("Report #%d added successfully\n", report.id);
 }
 
+void list(const char *district, const char *role, const char *user) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/reports.dat", district);
+
+    if(!check_access(path, role, 1, 0)) {
+        printf("Error: Access denied to read %s\n", path);
+        return;
+    }
+
+    struct stat st;
+    if(stat(path, &st) == 0) {
+        char perm_str[10];
+        mode_to_string(st.st_mode, perm_str);
+        printf("File: %s | Perms: %s | Size: %ld bytes | Last Mod: %s\n",
+               path, perm_str, st.st_size, ctime(&st.st_mtime));
+    }
+
+    int fd = open(path, O_RDONLY);
+    if(fd < 0) return;
+
+    Report_t report;
+    while(read(fd, &report, sizeof(Report_t)) == sizeof(Report_t)) {
+        printf("ID: %d | Cat: %s | Sev: %d | Insp: %s\n", report.id, report.category, report.severity, report.inspector);
+    }
+
+    close(fd);
+    add_log(district, role, user, "list");
+}
+
 int main(int argc, char* argv[]) {
 
     if(argc < 7) {
@@ -228,6 +272,20 @@ int main(int argc, char* argv[]) {
 
     if (strcmp(command, "add") == 0) {
         add(district, role, user);
+    }
+
+    else if (strcmp(command, "list") == 0) {
+        cmd_list(district, role, user);
+    } else if (strcmp(command, "view") == 0) {
+        if (cmd_arg1) cmd_view(district, role, user, atoi(cmd_arg1));
+    } else if (strcmp(command, "remove_report") == 0) {
+        if (cmd_arg1) cmd_remove_report(district, role, user, atoi(cmd_arg1));
+    } else if (strcmp(command, "update_threshold") == 0) {
+        if (cmd_arg1) cmd_update_threshold(district, role, user, cmd_arg1);
+    } else if (strcmp(command, "filter") == 0) {
+        cmd_filter(district, role, user, argc, argv, cmd_start_idx);
+    } else {
+        printf("Unknown command: %s\n", command);
     }
 
     return 0;
