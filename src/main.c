@@ -5,10 +5,15 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdbool.h>
+#include <time.h>
+
+#define MAX_STR 64
+#define MAX_DESC 256
 
 typedef struct Report {
     int id;
-    char name[31];
+    char inspector[MAX_STR];
     struct {
         float x;
         float y;
@@ -16,9 +21,58 @@ typedef struct Report {
     char category[11];
     int severity;
     time_t timestamp;
-    char desc[256];
+    char desc[MAX_DESC];
 
 } Report_t;
+
+//=====Utility=====
+bool check_access(const char *filepath, const char *role, int read, int write) {
+    if(!read && !write) {
+        printf("Useless access function call\n");
+        return 0;
+    }
+
+    struct stat st;
+    if(stat(filepath, &st) < 0) {
+        return false;
+    }
+
+    bool can_read=0, can_write=0;
+
+    if(strcmp(role, "manager") == 0) {
+        can_read = (st.st_mode & S_IRUSR) ? 1 : 0;
+        can_write = (st.st_mode & S_IWUSR) ? 1 : 0;
+    }
+    else if(strcmp(role, "inspector") == 0) {
+        can_read = (st.st_mode & S_IRGRP) ? 1 : 0;
+        can_write = (st.st_mode & S_IWGRP) ? 1 : 0;
+    }
+
+    if(read && !can_read) return 0;
+    if(write && !can_write) return 0;
+
+    return 1;
+}
+
+void add_log(const char* district, const char *role, const char *user, const char *action) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/logged_district", district);
+
+    if(!check_access(path, role, 0, 1)) {
+        printf("Warning! User %s (role: %s) has no write permission to add log. Action not logged\n", user, role);
+        return;
+    }
+
+    int fd = open(path, O_WRONLY || O_APPEND);
+    if(fd >= 0) {
+        char buffer[512];
+        time_t now = time(NULL);
+        snprintf((buffer, sizeof(buffer), "%ld\t%s\t%s\t%s\n"), now, user, role, action);
+        write(fd, buffer, strlen(buffer));
+        close(fd);
+    }
+}
+
 
 void init_district(const char *district) {
     struct stat st;
@@ -82,6 +136,52 @@ void init_district(const char *district) {
 //    }
 }
 
+//=====COMMANDS=====
+void add(const char *district, const char *role, const char *user) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/reports.dat", district);
+
+    //Check if user can write to file
+    if(!check_access(path, role, 0, 1)) {
+        printf("Error: Access denied to append to %s\n", path);
+        return;
+    }
+
+    Report_t report;
+
+
+    strncpy(report.inspector, user, MAX_STR);
+    report.timestamp = time(NULL);
+
+    printf("X: "); scanf("%f", &report.gps.x);
+    printf("Y: "); scanf("%f", &report.gps.y);
+    printf("Category (road/lighting/flooding/other): "); scanf("%s", report.category);
+    printf("Severity level (1-3): "); scanf("%d", &report.severity);
+
+    printf("Description: ");
+    getchar();
+    fgets(report.desc, MAX_DESC, stdin);
+    report.desc[strcspn(report.desc, "\n")] = 0;
+
+    int fd = open(path, O_RDWR);
+    if(fd < 0) return;
+
+    //Find ID
+    struct stat st;
+    fstat(fd, &st);
+    if(st.st_size > 0) {
+        report.id = (st.st_size / (int)sizeof(Report_t)) + 1;
+    }
+
+    //Write to file
+    lseek(fd, 0, SEEK_END);
+    write(fd, &report, sizeof(Report_t));
+    close(fd);
+
+    add_log(district, role, user, "add");
+    printf("Report #%d added successfully\n", report.id);
+}
+
 int main(int argc, char* argv[]) {
 
     if(argc < 7) {
@@ -125,6 +225,10 @@ int main(int argc, char* argv[]) {
 
     init_district(district);
 
+
+    if (strcmp(command, "add") == 0) {
+        add(district, role, user);
+    }
 
     return 0;
 }
