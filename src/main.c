@@ -259,6 +259,87 @@ void view(const char *district, const char *role, const char *user, int target_i
     }
 }
 
+void remove_report(const char *district, const char *role, const char *user, int target_id) {
+    if(strcmp(role, "manager") != 0) {
+        printf("Error: Access denied! Only managers can remove reports.\n");
+        return;
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/reports.dat", district);
+
+    int fd = open(path, O_RDWR);
+    if(fd < 0) return;
+
+    struct stat st;
+    fstat(fd, &st);
+
+    int record_count = st.st_size / sizeof(Report_t);
+
+    Report_t r;
+    int report_index = -1;
+    for(int i=0;i<record_count;i++) {
+        read(fd, &r, sizeof(Report_t));
+        if(r.id == target_id) {
+            report_index = i;
+            break;
+        }
+    }
+
+    if(report_index == -1) {
+        printf("Report %d not found!\n", target_id);
+        close(fd);
+        return;
+    }
+
+    for(int i = report_index + 1; i < record_count; i++) {
+        lseek(fd, i * sizeof(Report_t), SEEK_SET);
+        read(fd, &r, sizeof(Report_t));
+
+        lseek(fd, (i-1)*sizeof(Report_t), SEEK_SET);
+        write(fd, &r, sizeof(Report_t));
+    }
+
+    ftruncate(fd, (record_count-1) * sizeof(Report_t));
+    close(fd);
+
+    printf("Report %d removed successfully.\n", target_id);
+    add_log(district, role, user, "remove_report");
+}
+
+void update_threshold(const char *district, const char *role, const char *user, const char *value) {
+    if(strcmp(role, "manager") != 0) {
+        printf("Error: Access denied! Only managers can update the threshold.\n");
+        return;
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/district.cfg", district);
+
+    struct stat st;
+    if(stat(path, &st) == 0) {
+        if((st.st_mode & 0777) != 0640) {
+            printf("Security Error: Permission on %s have been altered. Aborting..\n", path);
+            return;
+        }
+    }
+
+    int fd = open(path, O_WRONLY | O_TRUNC);
+    if(fd >= 0) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "THRESHOLD=%s\n", value);
+        write(fd, buf, strlen(buf));
+        close(fd);
+        printf("Threshold updated successfully to %s\n", value);
+        add_log(district, role, user, "update_threshold");
+        return;
+    }
+
+    close(fd);
+    printf("Error writing threshold\n");
+
+}
+
 int main(int argc, char* argv[]) {
 
     if(argc < 7) {
@@ -311,6 +392,12 @@ int main(int argc, char* argv[]) {
         list(district, role, user);
     } else if (strcmp(command, "view") == 0) {
         if (cmd_arg1) view(district, role, user, atoi(cmd_arg1));
+    } else if (strcmp(command, "remove_report") == 0) {
+        if (cmd_arg1) remove_report(district, role, user, atoi(cmd_arg1));
+    } else if (strcmp(command, "update_threshold") == 0) {
+        if (cmd_arg1) cmd_update_threshold(district, role, user, cmd_arg1);
+    } else if (strcmp(command, "filter") == 0) {
+        cmd_filter(district, role, user, argc, argv, cmd_start_idx);
     } else {
         printf("Unknown command: %s\n", command);
     }
