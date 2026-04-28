@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -226,6 +227,38 @@ void list(const char *district, const char *role, const char *user) {
     add_log(district, role, user, "list");
 }
 
+void view(const char *district, const char *role, const char *user, int target_id) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/reports.dat", district);
+
+    if(!check_access(path, role, 1, 0)) {
+        printf("Error: Access denied to read: %s\n", path);
+        return;
+    }
+
+    int fd = open(path, O_RDONLY);
+    if(fd < 0)  return;
+
+    Report_t r;
+    bool found = false;
+    while(read(fd, &r, sizeof(Report_t)) == sizeof(Report_t)) {
+        if(r.id == target_id) {
+            printf("--- Report %d ---\n", r.id);
+            printf("Inspector: %s\nLocation: (%.2f lat, %.2f lon)\n", r.inspector, r.gps.x, r.gps.y);
+            printf("Category: %s\nSeverity: %d\nTime: %s\nDescription: %s\n", r.category, r.severity, ctime(&r.timestamp), r.desc);
+            found = true;
+            break;
+        }
+    }
+
+    close(fd);
+    if(!found) {
+        printf("Report %d not found!\n", target_id);
+    } else {
+        add_log(district, role, user, "view");
+    }
+}
+
 int main(int argc, char* argv[]) {
 
     if(argc < 7) {
@@ -275,15 +308,9 @@ int main(int argc, char* argv[]) {
     }
 
     else if (strcmp(command, "list") == 0) {
-        cmd_list(district, role, user);
+        list(district, role, user);
     } else if (strcmp(command, "view") == 0) {
-        if (cmd_arg1) cmd_view(district, role, user, atoi(cmd_arg1));
-    } else if (strcmp(command, "remove_report") == 0) {
-        if (cmd_arg1) cmd_remove_report(district, role, user, atoi(cmd_arg1));
-    } else if (strcmp(command, "update_threshold") == 0) {
-        if (cmd_arg1) cmd_update_threshold(district, role, user, cmd_arg1);
-    } else if (strcmp(command, "filter") == 0) {
-        cmd_filter(district, role, user, argc, argv, cmd_start_idx);
+        if (cmd_arg1) view(district, role, user, atoi(cmd_arg1));
     } else {
         printf("Unknown command: %s\n", command);
     }
