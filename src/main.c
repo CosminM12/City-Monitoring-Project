@@ -68,7 +68,7 @@ void add_log(const char* district, const char *role, const char *user, const cha
     if(fd >= 0) {
         char buffer[512];
         time_t now = time(NULL);
-        snprintf((buffer, sizeof(buffer), "%ld\t%s\t%s\t%s\n"), now, user, role, action);
+        snprintf(buffer, sizeof(buffer), "%ld\t%s\t%s\t%s\n", now, user, role, action);
         write(fd, buffer, strlen(buffer));
         close(fd);
     }
@@ -95,7 +95,7 @@ void init_district(const char *district) {
 
     //Check if district exits or create it (750)
     if(stat(district, &st) == -1) {
-        mkdir(district);
+        mkdir(district, 0750);
         chmod(district, 0750);
     }
 
@@ -134,22 +134,22 @@ void init_district(const char *district) {
     }
 
     //Check for symbolic links
-//    char symb_link[256];
-//    snprintf(symb_link, sizeof(symb_link), "active-reports-%s", district);
-//
-//    struct stat lst;
-//    if(lstat(symb_link, &lst) == 0) {
-//        if(S_ISLNK(lst.st_mode)) {
-//            if(stat(symb_link, &st) == -1) {
-//                printf("Warning! Dangling symbolic link detected: %s. Recreating...\n", symb_link);
-//                unlink(symb_link);
-//                symlink(path, symb_link);
-//            }
-//        }
-//        else {
-//            symlink(path, symb_link);
-//        }
-//    }
+   char symb_link[256];
+   snprintf(symb_link, sizeof(symb_link), "active-reports-%s", district);
+
+   struct stat lst;
+   if(lstat(symb_link, &lst) == 0) {
+       if(S_ISLNK(lst.st_mode)) {
+           if(stat(symb_link, &st) == -1) {
+               printf("Warning! Dangling symbolic link detected: %s. Recreating...\n", symb_link);
+               unlink(symb_link);
+               symlink(path, symb_link);
+           }
+       }
+       else {
+           symlink(path, symb_link);
+       }
+   }
 }
 
 //=====COMMANDS=====
@@ -186,7 +186,7 @@ void add(const char *district, const char *role, const char *user) {
     struct stat st;
     fstat(fd, &st);
     if(st.st_size > 0) {
-        report.id = (st.st_size / (int)sizeof(Report_t)) + 1;
+        report.id = (int)(st.st_size / sizeof(Report_t)) + 1;
     }
 
     //Write to file
@@ -197,6 +197,54 @@ void add(const char *district, const char *role, const char *user) {
     add_log(district, role, user, "add");
     printf("Report #%d added successfully\n", report.id);
 }
+
+//=====AI-Assisted Functions=====
+int parse_condition(const char *input, char *field, char *op, char *value) {
+    const char *colon1 = strchr(input, ':');
+    if (!colon1) return 0;
+    const char *colon2 = strchr(colon1 + 1, ':');
+    if (!colon2) return 0;
+
+    int field_len = colon1 - input;
+    strncpy(field, input, field_len); field[field_len] = '\0';
+
+    int op_len = colon2 - (colon1 + 1);
+    strncpy(op, colon1 + 1, op_len); op[op_len] = '\0';
+
+    strcpy(value, colon2 + 1);
+    return 1;
+}
+
+int match_condition(Report_t *r, const char *field, const char *op, const char *value) {
+    if (strcmp(field, "severity") == 0) {
+        int v = atoi(value);
+        if (strcmp(op, "==") == 0) return r->severity == v;
+        if (strcmp(op, "!=") == 0) return r->severity != v;
+        if (strcmp(op, ">=") == 0) return r->severity >= v;
+        if (strcmp(op, "<=") == 0) return r->severity <= v;
+        if (strcmp(op, ">") == 0)  return r->severity > v;
+        if (strcmp(op, "<") == 0)  return r->severity < v;
+    }
+    else if (strcmp(field, "timestamp") == 0) {
+        time_t v = (time_t)atol(value);
+        if (strcmp(op, "==") == 0) return r->timestamp == v;
+        if (strcmp(op, "!=") == 0) return r->timestamp != v;
+        if (strcmp(op, ">=") == 0) return r->timestamp >= v;
+        if (strcmp(op, "<=") == 0) return r->timestamp <= v;
+        if (strcmp(op, ">") == 0)  return r->timestamp > v;
+        if (strcmp(op, "<") == 0)  return r->timestamp < v;
+    }
+    else if (strcmp(field, "category") == 0) {
+        if (strcmp(op, "==") == 0) return strcmp(r->category, value) == 0;
+        if (strcmp(op, "!=") == 0) return strcmp(r->category, value) != 0;
+    }
+    else if (strcmp(field, "inspector") == 0) {
+        if (strcmp(op, "==") == 0) return strcmp(r->inspector, value) == 0;
+        if (strcmp(op, "!=") == 0) return strcmp(r->inspector, value) != 0;
+    }
+    return 0;
+}
+
 
 void list(const char *district, const char *role, const char *user) {
     char path[256];
@@ -340,6 +388,42 @@ void update_threshold(const char *district, const char *role, const char *user, 
 
 }
 
+void filter(const char *district, const char *role, const char *user, int argc, char *argv[], int start_idx) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/reports.dat", district);
+
+    if (!check_access(path, role, 1, 0)) {
+        printf("Error: Acces denied to read %s\n", path);
+        return;
+    }
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return;
+
+    Report_t r;
+    while (read(fd, &r, sizeof(Report_t)) == sizeof(Report_t)) {
+        bool isValid = true;
+
+        for(int i=start_idx;i<argc;i++) {
+            char field[32], op[4], val[32];
+            if (parse_condition(argv[i], field, op, val)) {
+                if (!match_condition(&r, field, op, val)) {
+                    isValid = false;
+                    break;
+                }
+            }
+        }
+
+        if (isValid) {
+            printf("ID: %d | Cat: %s | Sev: %d | Insp: %s\n", r.id, r.category, r.severity, r.inspector);
+        }
+    }
+
+    close(fd);
+    add_log(district, role, user, "filter");
+}
+
+
 int main(int argc, char* argv[]) {
 
     if(argc < 7) {
@@ -395,9 +479,9 @@ int main(int argc, char* argv[]) {
     } else if (strcmp(command, "remove_report") == 0) {
         if (cmd_arg1) remove_report(district, role, user, atoi(cmd_arg1));
     } else if (strcmp(command, "update_threshold") == 0) {
-        if (cmd_arg1) cmd_update_threshold(district, role, user, cmd_arg1);
+        if (cmd_arg1) update_threshold(district, role, user, cmd_arg1);
     } else if (strcmp(command, "filter") == 0) {
-        cmd_filter(district, role, user, argc, argv, cmd_start_idx);
+        filter(district, role, user, argc, argv, cmd_start_idx);
     } else {
         printf("Unknown command: %s\n", command);
     }
