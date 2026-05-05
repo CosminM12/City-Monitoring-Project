@@ -163,7 +163,7 @@ void add(const char *district, const char *role, const char *user) {
         return;
     }
 
-    Report_t report;
+    Report_t report = {0};
 
 
     strncpy(report.inspector, user, MAX_STR);
@@ -181,6 +181,8 @@ void add(const char *district, const char *role, const char *user) {
 
     int fd = open(path, O_RDWR);
     if(fd < 0) return;
+
+    report.id = 1;
 
     //Find ID
     struct stat st;
@@ -422,6 +424,7 @@ void filter(const char *district, const char *role, const char *user, int argc, 
     close(fd);
     add_log(district, role, user, "filter");
 }
+
 
 
 int main(int argc, char* argv[]) {
