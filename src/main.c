@@ -270,7 +270,7 @@ void add(const char *district, const char *role, const char *user) {
         snprintf(log_msg, sizeof(log_msg), "addd (monitor informed)");
     }
     else {
-        snprintf(log_msg, sizeof(log_msg), "add (monitor could not be informed"));
+        snprintf(log_msg, sizeof(log_msg), "add (monitor could not be informed");
     }
 
     add_log(district, role, user, log_msg);
