@@ -3,4 +3,5 @@ project(OS_Project C)
 
 set(CMAKE_C_STANDARD 11)
 
-add_executable(OS_Project src/main.c)
+add_executable(OS_Project src/main.c
+        src/monitor_reports.c)

@@ -137,7 +137,7 @@ void init_district(const char *district) {
 
     //Check for symbolic links
    char symb_link[256];
-   snprintf(symb_link, sizeof(symb_link), "active-reports-%s", district);
+   snprintf(symb_link, sizeof(symb_link), "active_reports-%s", district);
 
    struct stat lst;
    if(lstat(symb_link, &lst) == 0) {
@@ -151,6 +151,9 @@ void init_district(const char *district) {
        else {
            symlink(path, symb_link);
        }
+   }
+   else {
+        symlink(path, symb_link);
    }
 }
 
@@ -267,10 +270,10 @@ void add(const char *district, const char *role, const char *user) {
 
     char log_msg[128];
     if(monitor_notified) {
-        snprintf(log_msg, sizeof(log_msg), "addd (monitor informed)");
+        snprintf(log_msg, sizeof(log_msg), "add (monitor informed)");
     }
     else {
-        snprintf(log_msg, sizeof(log_msg), "add (monitor could not be informed");
+        snprintf(log_msg, sizeof(log_msg), "add (monitor could not be informed)");
     }
 
     add_log(district, role, user, log_msg);
@@ -462,7 +465,7 @@ void remove_district(const char *district, const char *role, const char *user) {
 
     //Unlink symb links
     char symb_link[256];
-    snprintf(symb_link, sizeof(symb_link), "active-reports-%s", district);
+    snprintf(symb_link, sizeof(symb_link), "active_reports-%s", district);
     unlink(symb_link);
 
     //Fork child process to run 'rm -rf'
