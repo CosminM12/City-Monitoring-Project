@@ -1,13 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <stdbool.h>
+#include <signal.h>
 #include <time.h>
+#include <dirent.h>
 
 #define MAX_STR 64
 #define MAX_DESC 256
@@ -152,54 +154,6 @@ void init_district(const char *district) {
    }
 }
 
-//=====COMMANDS=====
-void add(const char *district, const char *role, const char *user) {
-    char path[256];
-    snprintf(path, sizeof(path), "%s/reports.dat", district);
-
-    //Check if user can write to file
-    if(!check_access(path, role, 0, 1)) {
-        printf("Error: Access denied to append to %s\n", path);
-        return;
-    }
-
-    Report_t report = {0};
-
-
-    strncpy(report.inspector, user, MAX_STR);
-    report.timestamp = time(NULL);
-
-    printf("X: "); scanf("%f", &report.gps.x);
-    printf("Y: "); scanf("%f", &report.gps.y);
-    printf("Category (road/lighting/flooding/other): "); scanf("%s", report.category);
-    printf("Severity level (1-3): "); scanf("%d", &report.severity);
-
-    printf("Description: ");
-    getchar();
-    fgets(report.desc, MAX_DESC, stdin);
-    report.desc[strcspn(report.desc, "\n")] = 0;
-
-    int fd = open(path, O_RDWR);
-    if(fd < 0) return;
-
-    report.id = 1;
-
-    //Find ID
-    struct stat st;
-    fstat(fd, &st);
-    if(st.st_size > 0) {
-        report.id = (int)(st.st_size / sizeof(Report_t)) + 1;
-    }
-
-    //Write to file
-    lseek(fd, 0, SEEK_END);
-    write(fd, &report, sizeof(Report_t));
-    close(fd);
-
-    add_log(district, role, user, "add");
-    printf("Report #%d added successfully\n", report.id);
-}
-
 //=====AI-Assisted Functions=====
 int parse_condition(const char *input, char *field, char *op, char *value) {
     const char *colon1 = strchr(input, ':');
@@ -245,6 +199,81 @@ int match_condition(Report_t *r, const char *field, const char *op, const char *
         if (strcmp(op, "!=") == 0) return strcmp(r->inspector, value) != 0;
     }
     return 0;
+}
+
+
+//=====COMMANDS=====
+void add(const char *district, const char *role, const char *user) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/reports.dat", district);
+
+    //Check if user can write to file
+    if(!check_access(path, role, 0, 1)) {
+        printf("Error: Access denied to append to %s\n", path);
+        return;
+    }
+
+    Report_t report = {0};
+
+
+    strncpy(report.inspector, user, MAX_STR);
+    report.timestamp = time(NULL);
+
+    printf("X: "); scanf("%f", &report.gps.x);
+    printf("Y: "); scanf("%f", &report.gps.y);
+    printf("Category (road/lighting/flooding/other): "); scanf("%s", report.category);
+    printf("Severity level (1-3): "); scanf("%d", &report.severity);
+
+    printf("Description: ");
+    getchar();
+    fgets(report.desc, MAX_DESC, stdin);
+    report.desc[strcspn(report.desc, "\n")] = 0;
+
+    int fd = open(path, O_RDWR);
+    if(fd < 0) return;
+
+    report.id = 1;
+
+    //Find ID
+    struct stat st;
+    fstat(fd, &st);
+    if(st.st_size > 0) {
+        report.id = (int)(st.st_size / sizeof(Report_t)) + 1;
+    }
+
+    //Write to file
+    lseek(fd, 0, SEEK_END);
+    write(fd, &report, sizeof(Report_t));
+    close(fd);
+
+    printf("Report #%d added successfully\n", report.id);
+
+    //Notify monitor_reports via SIGUSR1 (phase 2)
+    int monitor_notified = 0;
+    int pid_fd = open(".monitor_pid", O_RDONLY);
+    if(pid_fd >= 0) {
+        char pid_buff[32] = {0};
+        if(read(pid_fd, pid_buff, sizeof(pid_buff)-1) > 0) {
+            pid_t monitor_pid = atoi(pid_buff);
+
+            //Send SIGUSR1
+            if(monitor_pid > 0 && kill(monitor_pid, SIGUSR1) == 0) {
+                monitor_notified = 1;
+            }
+        }
+
+        close(pid_fd);
+    }
+
+    char log_msg[128];
+    if(monitor_notified) {
+        snprintf(log_msg, sizeof(log_msg), "addd (monitor informed)");
+    }
+    else {
+        snprintf(log_msg, sizeof(log_msg), "add (monitor could not be informed"));
+    }
+
+    add_log(district, role, user, log_msg);
 }
 
 
@@ -425,7 +454,35 @@ void filter(const char *district, const char *role, const char *user, int argc, 
     add_log(district, role, user, "filter");
 }
 
+void remove_district(const char *district, const char *role, const char *user) {
+    if(strcmp(role, "manager") != 0) {
+        printf("Error: Access denied! Only managers can remove districts.\n");
+        return;
+    }
 
+    //Unlink symb links
+    char symb_link[256];
+    snprintf(symb_link, sizeof(symb_link), "active-reports-%s", district);
+    unlink(symb_link);
+
+    //Fork child process to run 'rm -rf'
+    pid_t pid = fork();
+
+    if(pid < 0) {
+        perror("Fork failed");
+        return;
+    }
+    else if(pid == 0) {
+        execlp("rm", "rm", "-rf", district, NULL);
+
+        perror("execlp failed");
+        exit(1);
+    }
+    else {
+        wait(NULL);
+        printf("District %s and its symb_link have been entirely removed.\n", district);
+    }
+}
 
 int main(int argc, char* argv[]) {
 
@@ -467,8 +524,9 @@ int main(int argc, char* argv[]) {
     }
 
 
-
-    init_district(district);
+    if(strcmp(command, "remove_district") != 0) {
+        init_district(district);
+    }
 
 
     if (strcmp(command, "add") == 0) {
@@ -485,6 +543,8 @@ int main(int argc, char* argv[]) {
         if (cmd_arg1) update_threshold(district, role, user, cmd_arg1);
     } else if (strcmp(command, "filter") == 0) {
         filter(district, role, user, argc, argv, cmd_start_idx);
+    } else if(strcmp(command, "remove_district") == 0) {
+        remove_district(district, role, user);
     } else {
         printf("Unknown command: %s\n", command);
     }

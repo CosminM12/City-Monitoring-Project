@@ -2,6 +2,8 @@
 
 **Tool Used:** Google Gemini
 
+## Phase 1
+
 ### Task 1: Generating `parse_condition`
 
 **Prompt Given:**
@@ -23,3 +25,29 @@ The AI generated a function that contains an if-else tree checking by the field 
 
 **What I changed and why:**
 I had to add another else-if branch to check for the timestamp inequalities and implement the possible cases using another prompt: "Please also include the possible cases and operators for the 'timestamp' field", after which it gave the final answer correct.
+
+---
+
+## Phase 2
+
+### Task 3: Understanding `fork()` and `exec()` for Directory Deletion
+
+**Prompt Given:**
+> I need to delete a directory and its contents using the external `rm -rf` command in C. I must use `fork()` and the `exec*()` family of functions. How do I safely do this and wait for the deletion to finish?
+
+**What was generated:**
+The AI provided a code structure utilizing `pid_t pid = fork()`. It explained that inside the `if (pid == 0)` block (the child process), I should use `execlp("rm", "rm", "-rf", district_name, NULL)`. In the `else` block (the parent process), it demonstrated using `wait(NULL)` to pause the main program until the `rm` command completed.
+
+**What I changed and why:**
+I implemented this exact architecture inside my `remove_district` function. Before the `fork()`, I also added an `unlink()` call to ensure the active reports symbolic link associated with that district was deleted concurrently.
+
+### Task 4: Signal Handling with `sigaction` and `kill`
+
+**Prompt Given:**
+> How do I use `sigaction` (not `signal`) to catch `SIGINT` and `SIGUSR1` in a C program, and how do I send a `SIGUSR1` from a different C program if I know its PID?
+
+**What was generated:**
+The AI showed how to populate the `struct sigaction` and use `sigemptyset` to clear the mask before calling `sigaction(SIGINT, &sa, NULL)`. It highlighted a critical security aspect: `printf()` is not async-signal-safe, and I should use `write(STDOUT_FILENO, ...)` inside signal handlers instead. For the sending program, it showed the `kill(pid, SIGUSR1)` function.
+
+**What I changed and why:**
+I used the `write` function in `monitor_reports.c` handlers to ensure safe execution. In `city_manager.c`, I added a check to open `.monitor_pid`, read the PID using `atoi`, and used the `kill()` command to send `SIGUSR1` after appending data to `reports.dat`.
